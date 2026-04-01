@@ -218,6 +218,7 @@ export default function App() {
   const [reportName, setReportName] = useState('');
   const [permanentMappings, setPermanentMappings] = useState<PermanentMapping[]>([]);
   const [selectedOrphan, setSelectedOrphan] = useState<FinancialReportRecord | null>(null);
+  const [searchVoompQuery, setSearchVoompQuery] = useState('');
   const [searchPipeQuery, setSearchPipeQuery] = useState('');
   const [currentReportId, setCurrentReportId] = useState<string | null>(null);
   const [authorizedUsers, setAuthorizedUsers] = useState<AuthorizedUser[]>([]);
@@ -884,6 +885,17 @@ export default function App() {
     return financialData.filter(r => r.Venda_Orfã === 'SIM' && r['Tipo de Venda'] === 'Nova Venda');
   }, [financialData]);
 
+  const filteredVoompOrphans = useMemo(() => {
+    if (!searchVoompQuery) return manualOrphans;
+    const q = searchVoompQuery.toLowerCase();
+    return manualOrphans.filter(r =>
+      (r['Nome do comprador'] || '').toLowerCase().includes(q) ||
+      (r['Email do comprador'] || '').toLowerCase().includes(q) ||
+      (r['CPF/CNPJ'] || '').includes(searchVoompQuery) ||
+      (r['ID Venda'] || '').toString().includes(searchVoompQuery)
+    );
+  }, [manualOrphans, searchVoompQuery]);
+
   const stats = useMemo(() => {
     if (commercialData.length === 0) return null;
     const orphans = financialData.filter(r => r.Venda_Orfã === 'SIM');
@@ -1417,14 +1429,17 @@ export default function App() {
                       formatBR={formatBR}
                     />
                   </Suspense>
-                ) : activeTab === 'manual' ? (
-                  <Suspense fallback={<div className="p-20 text-center animate-pulse">Carregando Conciliação Manual...</div>}>
+                  ) : activeTab === 'manual' ? (
+                  <Suspense fallback={<div className="p-20 text-center animate-pulse">Carregando Concilição Manual...</div>}>
                     <ManualReconciliation 
                       user={user}
                       isProcessing={isProcessing}
                       manualOrphans={manualOrphans}
                       selectedOrphan={selectedOrphan}
                       setSelectedOrphan={setSelectedOrphan}
+                      searchVoompQuery={searchVoompQuery}
+                      setSearchVoompQuery={setSearchVoompQuery}
+                      filteredVoompOrphans={filteredVoompOrphans}
                       searchPipeQuery={searchPipeQuery}
                       setSearchPipeQuery={setSearchPipeQuery}
                       searchedPipeRecords={searchedPipeRecords}
