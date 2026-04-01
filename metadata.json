@@ -1,0 +1,5 @@
+{
+  "name": "Reconciliação PIPE vs VOOMP",
+  "description": "Ferramenta de conciliação entre bases comercial (PIPE) e financeira (Voomp) com múltiplas chaves de redundância.",
+  "requestFramePermissions": []
+}

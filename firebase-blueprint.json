@@ -1,0 +1,68 @@
+{
+  "entities": {
+    "AuthorizedUser": {
+      "title": "Authorized User",
+      "description": "A user authorized to access the application via whitelist.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "description": "The email address of the authorized user." },
+        "org_id": { "type": "string", "description": "The organization ID this user belongs to." },
+        "role": { "type": "string", "enum": ["admin", "user"], "description": "The role of the user." }
+      },
+      "required": ["email", "org_id", "role"]
+    },
+    "ReconciliationReport": {
+      "title": "Reconciliation Report",
+      "description": "A report containing the results of a reconciliation between PIPE and VOOMP bases.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "The UID of the user who created the report." },
+        "org_id": { "type": "string", "description": "The organization ID this report belongs to." },
+        "timestamp": { "type": "string", "format": "date-time", "description": "When the report was generated." },
+        "name": { "type": "string", "description": "A name for the report." },
+        "stats": {
+          "type": "object",
+          "properties": {
+            "totalPipe": { "type": "number" },
+            "matched": { "type": "number" },
+            "orphans": { "type": "number" },
+            "totalDivergence": { "type": "number" }
+          }
+        },
+        "commercialData": { "type": "string", "description": "JSON stringified commercial report data." },
+        "financialData": { "type": "string", "description": "JSON stringified financial report data." },
+        "gapData": { "type": "string", "description": "JSON stringified gap diagnosis data." },
+        "pipeRaw": { "type": "string", "description": "JSON stringified raw PIPE data." },
+        "voompRaw": { "type": "string", "description": "JSON stringified raw VOOMP data." }
+      },
+      "required": ["userId", "org_id", "timestamp", "stats"]
+    },
+    "DeParaPermanente": {
+      "title": "De-Para Permanente",
+      "description": "Permanent mapping between Voomp Sales and PIPE Deals.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "The UID of the user who created the mapping." },
+        "org_id": { "type": "string", "description": "The organization ID this mapping belongs to." },
+        "idVenda": { "type": "string", "description": "The ID Venda from Voomp." },
+        "negocioId": { "type": "string", "description": "The Negócio - ID from PIPE." },
+        "timestamp": { "type": "string", "format": "date-time", "description": "When the mapping was created." }
+      },
+      "required": ["userId", "org_id", "idVenda", "negocioId", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/authorized_users/{email}": {
+      "schema": "AuthorizedUser",
+      "description": "Collection of authorized users (whitelist)."
+    },
+    "/reconciliationReports/{reportId}": {
+      "schema": "ReconciliationReport",
+      "description": "Collection of reconciliation reports."
+    },
+    "/de_para_permanente/{mappingId}": {
+      "schema": "DeParaPermanente",
+      "description": "Collection of permanent mappings."
+    }
+  }
+}

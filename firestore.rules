@@ -1,0 +1,101 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() && 
+             request.auth.token.email in ["misaelcrepaldi@gmail.com", "chpy87@gmail.com", "misank@gmail.com"];
+    }
+
+    function matchesOrg(org_id) {
+      return isAuthenticated() && (
+        (isSuperAdmin() && org_id == 'axioma_consultoria') ||
+        (exists(/databases/$(database)/documents/authorized_users/$(request.auth.token.email)) && 
+         get(/databases/$(database)/documents/authorized_users/$(request.auth.token.email)).data.org_id == org_id)
+      );
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        isSuperAdmin() ||
+        (exists(/databases/$(database)/documents/authorized_users/$(request.auth.token.email)) && 
+         get(/databases/$(database)/documents/authorized_users/$(request.auth.token.email)).data.role == 'admin')
+      );
+    }
+
+    function isRecent(ts) {
+      return ts is timestamp && 
+             ts <= request.time + duration.value(5, 'm') &&
+             ts >= request.time - duration.value(5, 'm');
+    }
+
+    // ===============================================================
+    // Collections
+    // ===============================================================
+
+    match /authorized_users/{email} {
+      allow get: if isAuthenticated();
+      allow list: if isAdmin();
+      // Only admins can manage the whitelist
+      allow write: if isAdmin();
+    }
+
+    match /reconciliationReports/{reportId} {
+      function isValidReport(data) {
+        return data.userId is string &&
+               data.org_id is string &&
+               data.timestamp is timestamp &&
+               data.stats is map;
+      }
+      allow read: if matchesOrg(resource.data.org_id);
+      allow create: if matchesOrg(request.resource.data.org_id) && isValidReport(request.resource.data);
+      allow update: if matchesOrg(resource.data.org_id) && matchesOrg(request.resource.data.org_id) && isValidReport(request.resource.data);
+      allow delete: if matchesOrg(resource.data.org_id) && isAdmin();
+
+      match /chunks/{chunkId} {
+        allow read: if matchesOrg(get(/databases/$(database)/documents/reconciliationReports/$(reportId)).data.org_id);
+        allow write: if matchesOrg(get(/databases/$(database)/documents/reconciliationReports/$(reportId)).data.org_id);
+      }
+    }
+
+    match /de_para_permanente/{mappingId} {
+      function isValidMapping(data) {
+        return data.userId is string &&
+               data.org_id is string &&
+               data.idVenda is string &&
+               data.negocioId is string &&
+               data.timestamp is timestamp;
+      }
+      allow read: if matchesOrg(resource.data.org_id);
+      allow create: if matchesOrg(request.resource.data.org_id) && isValidMapping(request.resource.data);
+      allow update: if matchesOrg(resource.data.org_id) && matchesOrg(request.resource.data.org_id) && isValidMapping(request.resource.data);
+      allow delete: if matchesOrg(resource.data.org_id) && isAdmin();
+    }
+
+    match /clientes/{clienteId} {
+      allow read: if matchesOrg(resource.data.org_id);
+      allow write: if matchesOrg(request.resource.data.org_id);
+    }
+
+    match /deals_pipe/{dealId} {
+      allow read: if matchesOrg(resource.data.org_id);
+      allow write: if matchesOrg(request.resource.data.org_id);
+    }
+
+    match /vendas_voomp/{vendaId} {
+      allow read: if matchesOrg(resource.data.org_id);
+      allow write: if matchesOrg(request.resource.data.org_id);
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      allow write: if isAuthenticated() && request.auth.uid == userId;
+    }
+  }
+}
