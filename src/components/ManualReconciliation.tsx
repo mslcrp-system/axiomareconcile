@@ -61,7 +61,7 @@ export const ManualReconciliation = React.memo(({
           )}
           <div className="bg-white/5 px-6 py-2.5 rounded-2xl border border-white/10 flex flex-col items-center min-w-[110px]">
              <span className="text-[9px] font-black text-gray-500 uppercase tracking-[0.3em] mb-0.5">Pendentes</span>
-             <span className="text-xl font-black text-white font-display tracking-tight">{manualOrphans.length}</span>
+             <span className="text-xl font-black text-white font-display tracking-tight">{manualOrphans?.length || 0}</span>
           </div>
         </div>
       </div>
@@ -79,7 +79,7 @@ export const ManualReconciliation = React.memo(({
               </div>
               Origem (Voomp)
             </h3>
-            <span className="text-[9px] font-black text-orange-400/60 uppercase tracking-widest">{manualOrphans.length} registros</span>
+            <span className="text-[9px] font-black text-orange-400/60 uppercase tracking-widest">{(manualOrphans?.length || 0)} registros</span>
           </div>
 
           {/* Voomp Search */}
@@ -97,18 +97,18 @@ export const ManualReconciliation = React.memo(({
           </div>
           
           <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-            {manualOrphans.length === 0 ? (
+            {manualOrphans?.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center opacity-20 py-32">
                 <CheckCircle2 className="w-14 h-14 mb-4" />
                 <p className="font-black uppercase tracking-[0.5em] text-xs">Torre Limpa</p>
               </div>
-            ) : filteredVoompOrphans.length === 0 ? (
+            ) : filteredVoompOrphans?.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center opacity-30 py-32 text-center">
                 <Search className="w-12 h-12 mb-3 text-gray-600" />
                 <p className="text-[10px] font-black uppercase tracking-[0.3em]">Nenhum resultado encontrado</p>
               </div>
             ) : (
-              filteredVoompOrphans.map((orphan) => (
+              filteredVoompOrphans?.map((orphan) => (
                 <div
                   key={`orphan-${orphan['ID Venda']}`}
                   onClick={() => setSelectedOrphan(orphan)}
@@ -207,13 +207,13 @@ export const ManualReconciliation = React.memo(({
                 <ArrowRightLeft className="w-16 h-16 mb-4 rotate-12" />
                 <p className="font-black uppercase tracking-[0.4em] text-xs max-w-[200px] text-center">Aguardando Seleção de Origem</p>
               </div>
-            ) : searchedPipeRecords.length === 0 ? (
+            ) : searchedPipeRecords?.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center py-32 text-center opacity-30">
                  <Search className="w-12 h-12 mb-3 text-gray-600" />
                  <p className="text-[10px] font-black uppercase tracking-[0.3em]">Nenhum negócio no Pipe encontrado</p>
               </div>
             ) : (
-              searchedPipeRecords.map((pipe) => (
+              searchedPipeRecords?.map((pipe) => (
                 <div
                   key={`pipe-search-${pipe['Negócio - ID']}`}
                   className="p-4 bg-[#0D1117] rounded-[1.5rem] border border-white/5 hover:border-primary-500/40 hover:shadow-[0_10px_30px_rgba(59,130,246,0.08)] transition-all duration-300 group/item relative overflow-hidden"

@@ -366,7 +366,7 @@ export default function App() {
         if (error) throw error;
         setAuthorizedUsers(data as AuthorizedUser[]);
       } catch (err) {
-        console.error('Erro ao buscar usuários:', err);
+        console.warn('Aviso: Falha temporária ao buscar lista de usuários.');
       }
     };
 
@@ -396,7 +396,7 @@ export default function App() {
         if (error) throw error;
         setClientes(data as Cliente[]);
       } catch (err) {
-        console.error('Erro ao buscar clientes:', err);
+        console.warn('Aviso: Falha temporária ao buscar lista de clientes.');
       }
     };
 
@@ -717,13 +717,13 @@ export default function App() {
 
   const savePermanentMapping = async (idVenda: string, negocioId: string) => {
     if (!user || !orgId) return;
-    const { error } = await supabase.from('pvpds_de_para_permanente').insert({
+    const { error } = await supabase.from('pvpds_de_para_permanente').upsert({
       id_venda: idVenda,
       negocio_id: negocioId,
       org_id: orgId,
       user_id: user.id,
       timestamp: new Date().toISOString()
-    });
+    }, { onConflict: 'id_venda' }); // Garante que não haverá conflito 409 por ID de venda duplicado
     if (error) throw error;
   };
 
