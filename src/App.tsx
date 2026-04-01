@@ -192,8 +192,8 @@ interface Cliente {
 
 interface PermanentMapping {
   id: string;
-  idVenda: string;
-  negocioId: string;
+  id_venda: string;
+  negocio_id: string;
 }
 
 export default function App() {
@@ -780,7 +780,7 @@ export default function App() {
       setVoompRawData(voompData);
       setCurrentReportId(null);
 
-      const mappingMap = new Map<string, string>(permanentMappings.map(m => [m.idVenda, m.negocioId]));
+      const mappingMap = new Map<string, string>(permanentMappings.map(m => [m.id_venda, m.negocio_id]));
       const { commercialReport, financialReport } = reconcile(pipeData, voompData, mappingMap);
       
       setCommercialData(commercialReport);
@@ -805,7 +805,7 @@ export default function App() {
       setVoompRawData(voompData);
       setCurrentReportId(null);
 
-      const mappingMap = new Map<string, string>(permanentMappings.map(m => [m.idVenda, m.negocioId]));
+      const mappingMap = new Map<string, string>(permanentMappings.map(m => [m.id_venda, m.negocio_id]));
       const { commercialReport, financialReport } = reconcile(pipeData, voompData, mappingMap);
       
       setCommercialData(commercialReport);
@@ -910,7 +910,7 @@ export default function App() {
     setIsProcessing(true);
     try {
       // 1. Build the mapping map immediately with the new pair (no stale closure)
-      const mappingMap = new Map<string, string>(permanentMappings.map(m => [m.idVenda, m.negocioId]));
+      const mappingMap = new Map<string, string>(permanentMappings.map(m => [m.id_venda, m.negocio_id]));
       mappingMap.set(idVenda, negocioId);
 
       // 2. Re-run reconciliation and update UI immediately (optimistic update)
