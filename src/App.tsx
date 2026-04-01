@@ -717,32 +717,14 @@ export default function App() {
 
   const savePermanentMapping = async (idVenda: string, negocioId: string) => {
     if (!user || !orgId) return;
-    try {
-      const { error } = await supabase.from('pvpds_de_para_permanente').insert({
-        id_venda: idVenda,
-        negocio_id: negocioId,
-        org_id: orgId,
-        user_id: user.id,
-        timestamp: new Date().toISOString()
-      });
-
-      if (error) throw error;
-
-      setNotification({ message: 'Mapeamento permanente salvo!', type: 'success' });
-      setTimeout(() => setNotification(null), 3000);
-      
-      // Re-run reconciliation with new mapping
-      const mappingMap = new Map<string, string>(permanentMappings.map(m => [m.idVenda, m.negocioId]));
-      mappingMap.set(idVenda, negocioId);
-      const { commercialReport, financialReport } = reconcile(pipeRawData, voompRawData, mappingMap);
-      setCommercialData(commercialReport);
-      setFinancialData(financialReport);
-      setSelectedOrphan(null);
-      setSearchPipeQuery('');
-    } catch (error) {
-      console.error('Error saving mapping:', error);
-      setNotification({ message: 'Erro ao salvar mapeamento.', type: 'error' });
-    }
+    const { error } = await supabase.from('pvpds_de_para_permanente').insert({
+      id_venda: idVenda,
+      negocio_id: negocioId,
+      org_id: orgId,
+      user_id: user.id,
+      timestamp: new Date().toISOString()
+    });
+    if (error) throw error;
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'pipe' | 'voomp') => {
@@ -925,49 +907,48 @@ export default function App() {
     const idVenda = selectedOrphan['ID Venda'];
     const negocioId = pipeRecord['Negócio - ID'];
 
+    setIsProcessing(true);
     try {
-      await savePermanentMapping(idVenda, negocioId);
-      
-      if (currentReportId) {
-        // Fetch current data to update
-        const { data: report, error: fetchErr } = await supabase
-          .from('pvpds_reconciliation_reports')
-          .select('commercial_data, financial_data')
-          .eq('id', currentReportId)
-          .single();
-        
-        if (report && !fetchErr) {
-          const currentCommercial = report.commercial_data as CommercialReportRecord[];
-          const currentFinancial = report.financial_data as FinancialReportRecord[];
-          
-          const mappingMap = new Map<string, string>(permanentMappings.map(m => [m.idVenda, m.negocioId]));
-          mappingMap.set(idVenda, negocioId);
-          
-          const { commercialReport, financialReport } = reconcile(pipeRawData, voompRawData, mappingMap);
-          
-          const stats = {
-            totalPipe: commercialReport.length,
-            matched: commercialReport.filter(r => r.Pendente_Financeiro === 'NÃO').length,
-            orphans: financialReport.filter(r => r.Venda_Orfã === 'SIM').length,
-            totalDivergence: commercialReport.reduce((acc, r) => acc + (typeof r.Divergência_Valor === 'number' ? r.Divergência_Valor : parseFloat(String(r.Divergência_Valor)) || 0), 0)
-          };
+      // 1. Build the mapping map immediately with the new pair (no stale closure)
+      const mappingMap = new Map<string, string>(permanentMappings.map(m => [m.idVenda, m.negocioId]));
+      mappingMap.set(idVenda, negocioId);
 
-          await supabase.from('pvpds_reconciliation_reports').update({
-            stats,
-            commercial_data: commercialReport,
-            financial_data: financialReport
-          }).eq('id', currentReportId);
-        }
-      }
+      // 2. Re-run reconciliation and update UI immediately (optimistic update)
+      const { commercialReport, financialReport } = reconcile(pipeRawData, voompRawData, mappingMap);
+      setCommercialData(commercialReport);
+      setFinancialData(financialReport);
 
+      // 3. Clear selection and search fields right away so the user sees instant feedback
       setSelectedOrphan(null);
       setSearchPipeQuery('');
-      setNotification({ message: 'Vínculo confirmado com sucesso!', type: 'success' });
+      setSearchVoompQuery('');
+
+      // 4. Persist to Supabase in background
+      await savePermanentMapping(idVenda, negocioId);
+
+      // 5. If a saved report exists, update its data as well
+      if (currentReportId) {
+        const stats = {
+          totalPipe: commercialReport.length,
+          matched: commercialReport.filter(r => r.Pendente_Financeiro === 'NÃO').length,
+          orphans: financialReport.filter(r => r.Venda_Orfã === 'SIM').length,
+          totalDivergence: commercialReport.reduce((acc, r) => acc + (typeof r.Divergência_Valor === 'number' ? r.Divergência_Valor : parseFloat(String(r.Divergência_Valor)) || 0), 0)
+        };
+        await supabase.from('pvpds_reconciliation_reports').update({
+          stats,
+          commercial_data: commercialReport,
+          financial_data: financialReport
+        }).eq('id', currentReportId);
+      }
+
+      setNotification({ message: 'Vínculo confirmado e salvo com sucesso!', type: 'success' });
       setTimeout(() => setNotification(null), 3000);
     } catch (error) {
       console.error('Error confirming link:', error);
       setNotification({ message: 'Erro ao confirmar vínculo.', type: 'error' });
       setTimeout(() => setNotification(null), 3000);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
