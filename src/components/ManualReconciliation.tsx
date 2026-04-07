@@ -3,6 +3,7 @@ import { AlertCircle, CheckCircle2, Search, ArrowRightLeft, RefreshCcw, Lock as 
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import type { User } from '@supabase/supabase-js';
+import type { FinancialReportRecord, PipeRecord } from '../utils/reconciliation';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -11,17 +12,17 @@ function cn(...inputs: ClassValue[]) {
 interface ManualReconciliationProps {
   user: User | null;
   isProcessing: boolean;
-  manualOrphans: any[];
-  selectedOrphan: any;
-  setSelectedOrphan: (orphan: any) => void;
+  manualOrphans: FinancialReportRecord[];
+  selectedOrphan: FinancialReportRecord | null;
+  setSelectedOrphan: (orphan: FinancialReportRecord | null) => void;
   searchVoompQuery: string;
   setSearchVoompQuery: (query: string) => void;
-  filteredVoompOrphans: any[];
+  filteredVoompOrphans: FinancialReportRecord[];
   searchPipeQuery: string;
   setSearchPipeQuery: (query: string) => void;
-  searchedPipeRecords: any[];
-  confirmLink: (pipe: any) => void;
-  formatBR: (val: any) => string;
+  searchedPipeRecords: PipeRecord[];
+  confirmLink: (pipe: PipeRecord) => void;
+  formatBR: (val: number | string | undefined) => string;
 }
 
 export const ManualReconciliation = React.memo(({

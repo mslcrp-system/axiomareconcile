@@ -442,12 +442,17 @@ export default function App() {
   };
   const addUser = async () => {
     if (!newUserEmail || !orgId) return;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newUserEmail)) {
+      setNotification({ message: 'E-mail inválido. Verifique o formato.', type: 'error' });
+      setTimeout(() => setNotification(null), 3000);
+      return;
+    }
     try {
       const { error } = await supabase.from('pvpds_authorized_users').upsert({
         email: newUserEmail.toLowerCase(),
         org_id: orgId,
         role: newUserRole,
-        name: newUserEmail.split('@')[0]
+        name: newUserEmail.split('@')[0] || 'Usuário'
       });
 
       if (error) throw error;
@@ -455,9 +460,13 @@ export default function App() {
       setNewUserEmail('');
       setNotification({ message: 'Usuário autorizado com sucesso!', type: 'success' });
       setTimeout(() => setNotification(null), 3000);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error adding user:', error);
-      setNotification({ message: 'Erro ao autorizar usuário.', type: 'error' });
+      const msg = error?.code === '42501' || error?.message?.includes('policy')
+        ? 'Sem permissão para adicionar usuário. Verifique as políticas de acesso.'
+        : 'Erro ao autorizar usuário.';
+      setNotification({ message: msg, type: 'error' });
+      setTimeout(() => setNotification(null), 4000);
     }
   };
 
@@ -519,15 +528,6 @@ export default function App() {
     }
   };
 
-  const sanitizeObject = (obj: any) => {
-    const sanitized: any = {};
-    for (const [key, value] of Object.entries(obj)) {
-      if (value !== undefined) {
-        sanitized[key] = value;
-      }
-    }
-    return sanitized;
-  };
 
   const saveReport = async () => {
     if (!user || !orgId || commercialData.length === 0) return;
@@ -563,8 +563,7 @@ export default function App() {
         commercial_data: payloadSize <= MAX_PAYLOAD_BYTES ? commercialData : commercialData.slice(0, 500),
         financial_data: payloadSize <= MAX_PAYLOAD_BYTES ? financialData : financialData.slice(0, 500),
         pipe_raw: payloadSize <= MAX_PAYLOAD_BYTES ? pipeRawData : [],
-        voomp_raw: payloadSize <= MAX_PAYLOAD_BYTES ? voompRawData : [],
-        hasChunks: payloadSize > MAX_PAYLOAD_BYTES
+        voomp_raw: payloadSize <= MAX_PAYLOAD_BYTES ? voompRawData : []
       };
 
       if (payloadSize > MAX_PAYLOAD_BYTES) {
@@ -943,10 +942,15 @@ export default function App() {
 
       setNotification({ message: 'Vínculo confirmado e salvo com sucesso!', type: 'success' });
       setTimeout(() => setNotification(null), 3000);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error confirming link:', error);
-      setNotification({ message: 'Erro ao confirmar vínculo.', type: 'error' });
-      setTimeout(() => setNotification(null), 3000);
+      const msg = error?.code === '42501' || error?.message?.includes('policy')
+        ? 'Sem permissão para salvar. Fale com o administrador.'
+        : error?.message?.includes('constraint')
+        ? 'Erro de banco: constraint ausente. Rode o SQL de UNIQUE na coluna id_venda.'
+        : 'Erro ao confirmar vínculo.';
+      setNotification({ message: msg, type: 'error' });
+      setTimeout(() => setNotification(null), 4000);
     } finally {
       setIsProcessing(false);
     }

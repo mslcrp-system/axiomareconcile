@@ -26,6 +26,8 @@ export interface VoompRecord {
 export interface CommercialReportRecord extends PipeRecord {
   'Divergência_Valor': number;
   'Pendente_Financeiro': string;
+  'Match_Score'?: string;
+  'Match_Confiança'?: number;
   [key: string]: any;
 }
 
@@ -40,7 +42,17 @@ export interface FinancialReportRecord extends VoompRecord {
 }
 
 export const cleanEmail = (email: string) => email?.toLowerCase().trim() || '';
-export const cleanCPF = (cpf: string) => cpf?.replace(/\D/g, '') || '';
+export const cleanCPF = (cpf: string) => {
+  if (!cpf) return '';
+  const numOnly = String(cpf).replace(/\D/g, '');
+  if (numOnly.length < 11) return '';
+  if (/^(\d)\1+$/.test(numOnly)) return ''; // ignora '00000000000', '11111111111', etc
+  return numOnly;
+};
+export const normalizeName = (name: any): string => {
+  if (!name || typeof name !== 'string') return '';
+  return name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+};
 
 export const parseBR = (val: any): number => {
   if (val === undefined || val === null) return 0;
@@ -90,10 +102,12 @@ export const formatBR = (val: number | string | undefined): string => {
 export const VOOMP_ID_FIELDS = ['ID Venda', 'ID_Venda', 'Venda ID', 'ID', 'Venda', 'Código Venda', 'Código', 'ID da Venda'];
 export const VOOMP_CPF_FIELDS = ['CPF/CNPJ', 'CPF', 'CNPJ', 'CPF Comprador', 'CNPJ Comprador', 'Documento', 'Documento do Comprador'];
 export const VOOMP_EMAIL_FIELDS = ['Email do comprador', 'Email', 'E-mail', 'Email Comprador', 'E-mail do Comprador'];
+export const VOOMP_NAME_FIELDS = ['Nome do comprador', 'Nome', 'Comprador'];
 
 export const PIPE_ID_FIELDS = ['Negócio - ID', 'ID Negócio', 'ID', 'Deal ID'];
 export const PIPE_CPF_FIELDS = ['Pessoa - CPF', 'CPF', 'Pessoa CPF', 'CPF/CNPJ', 'Documento'];
 export const PIPE_EMAIL_FIELDS = ['Pessoa - E-mail', 'Email', 'Pessoa Email', 'E-mail'];
+export const PIPE_NAME_FIELDS = ['Pessoa - Nome', 'Nome do contato', 'Nome'];
 
 export const extractNumericCommission = (val: any): number => {
   if (typeof val === 'number') return val;
@@ -140,12 +154,14 @@ export function reconcile(
   // 1. Prepare Lookup Maps for Voomp (for PIPE Anchor)
   const voompByCPF = new Map<string, VoompRecord[]>();
   const voompByEmail = new Map<string, VoompRecord[]>();
+  const voompByName = new Map<string, VoompRecord[]>();
   
   const permanentVoompByPipeId = new Map<string, VoompRecord>();
 
   voompData.forEach(record => {
     const cpf = cleanCPF(getField(record, VOOMP_CPF_FIELDS));
     const email = cleanEmail(getField(record, VOOMP_EMAIL_FIELDS));
+    const name = normalizeName(getField(record, VOOMP_NAME_FIELDS));
     const idVenda = getField(record, VOOMP_ID_FIELDS);
 
     if (cpf) {
@@ -158,6 +174,11 @@ export function reconcile(
       existing.push(record);
       voompByEmail.set(email, existing);
     }
+    if (name) {
+      const existing = voompByName.get(name) || [];
+      existing.push(record);
+      voompByName.set(name, existing);
+    }
     
     if (idVenda) {
       for (const [vId, pId] of permanentMappings.entries()) {
@@ -168,23 +189,55 @@ export function reconcile(
     }
   });
 
-  // Track used Voomp records to avoid double-matching the same sale to different Pipe deals
   const usedVoompIds = new Set<string>();
-  // For records without ID, we use their object reference or a generated key
   const usedVoompRefs = new Set<VoompRecord>();
 
+  // Helper to find best Voomp candidate based on value tie-breaker
+  const findBestVoompCandidate = (candidates: VoompRecord[], targetValue: number): VoompRecord | undefined => {
+    let bestCandidate: VoompRecord | undefined;
+    let minDiff = Infinity;
+    for (const c of candidates) {
+      const id = getField(c, VOOMP_ID_FIELDS);
+      const isUsed = id ? usedVoompIds.has(id) : usedVoompRefs.has(c);
+      if (!isUsed) {
+        const vValue = parseBR(getField(c, ['Faturamento total', 'Faturamento', 'Valor Total', 'Valor Pago']));
+        const diff = Math.abs(targetValue - vValue);
+        if (diff < minDiff) {
+          minDiff = diff;
+          bestCandidate = c;
+        }
+      }
+    }
+    return bestCandidate;
+  };
+
   // 2. Prepare Lookup Maps for PIPE (for Voomp Anchor)
-  const pipeByCPF = new Map<string, PipeRecord>();
-  const pipeByEmail = new Map<string, PipeRecord>();
+  const pipeByCPF = new Map<string, PipeRecord[]>();
+  const pipeByEmail = new Map<string, PipeRecord[]>();
+  const pipeByName = new Map<string, PipeRecord[]>();
   const pipeById = new Map<string, PipeRecord>();
   
   pipeData.forEach(record => {
     const cpf = cleanCPF(getField(record, PIPE_CPF_FIELDS));
     const email = cleanEmail(getField(record, PIPE_EMAIL_FIELDS));
+    const name = normalizeName(getField(record, PIPE_NAME_FIELDS));
     const id = getField(record, PIPE_ID_FIELDS);
 
-    if (cpf && !pipeByCPF.has(cpf)) pipeByCPF.set(cpf, record);
-    if (email && !pipeByEmail.has(email)) pipeByEmail.set(email, record);
+    if (cpf) {
+      const existing = pipeByCPF.get(cpf) || [];
+      existing.push(record);
+      pipeByCPF.set(cpf, existing);
+    }
+    if (email) {
+      const existing = pipeByEmail.get(email) || [];
+      existing.push(record);
+      pipeByEmail.set(email, existing);
+    }
+    if (name) {
+      const existing = pipeByName.get(name) || [];
+      existing.push(record);
+      pipeByName.set(name, existing);
+    }
     if (id) pipeById.set(id, record);
   });
 
@@ -192,44 +245,59 @@ export function reconcile(
   const commercialReport = pipeData.map(pipeRecord => {
     const pipeCPF = cleanCPF(getField(pipeRecord, PIPE_CPF_FIELDS));
     const pipeEmail = cleanEmail(getField(pipeRecord, PIPE_EMAIL_FIELDS));
+    const pipeName = normalizeName(getField(pipeRecord, PIPE_NAME_FIELDS));
     const pipeId = getField(pipeRecord, PIPE_ID_FIELDS);
+    const pipeValue = parseBR(getField(pipeRecord, ['Negócio - Valor do negócio', 'Valor']));
 
     let match: VoompRecord | undefined;
+    let matchScore = '';
+    let matchConf = 0;
     
     // Priority 1: Permanent Mapping
     if (pipeId && permanentVoompByPipeId.has(pipeId)) {
-      const potentialMatch = permanentVoompByPipeId.get(pipeId);
-      if (potentialMatch) {
-        match = potentialMatch;
+      match = permanentVoompByPipeId.get(pipeId);
+      if (match) {
+        matchScore = 'Mapeamento Manual';
+        matchConf = 100;
       }
     } 
     
-    // Priority 2: CPF (Match and Consume)
+    // Priority 2: CPF
     if (!match && pipeCPF && voompByCPF.has(pipeCPF)) {
-      const candidates = voompByCPF.get(pipeCPF) || [];
-      // Find the first unused candidate
-      match = candidates.find(c => {
-        const id = getField(c, VOOMP_ID_FIELDS);
-        return id ? !usedVoompIds.has(id) : !usedVoompRefs.has(c);
-      });
+      match = findBestVoompCandidate(voompByCPF.get(pipeCPF) || [], pipeValue);
+      if (match) {
+        matchScore = 'CPF';
+        matchConf = 95;
+      }
     } 
     
-    // Priority 3: Email (Match and Consume)
+    // Priority 3: Email
     if (!match && pipeEmail && voompByEmail.has(pipeEmail)) {
-      const candidates = voompByEmail.get(pipeEmail) || [];
-      match = candidates.find(c => {
-        const id = getField(c, VOOMP_ID_FIELDS);
-        return id ? !usedVoompIds.has(id) : !usedVoompRefs.has(c);
-      });
+      match = findBestVoompCandidate(voompByEmail.get(pipeEmail) || [], pipeValue);
+      if (match) {
+        matchScore = 'E-mail';
+        matchConf = 80;
+      }
+    }
+
+    // Priority 4: Nome (Fallback)
+    if (!match && pipeName && voompByName.has(pipeName)) {
+      match = findBestVoompCandidate(voompByName.get(pipeName) || [], pipeValue);
+      if (match) {
+        matchScore = 'Nome';
+        matchConf = 60;
+      }
     }
 
     if (match) {
       const id = getField(match, VOOMP_ID_FIELDS);
       if (id) usedVoompIds.add(id);
       else usedVoompRefs.add(match);
+    } else {
+      matchScore = 'Sem Match';
+      matchConf = 0;
     }
 
-    const pipeValue = parseBR(getField(pipeRecord, ['Negócio - Valor do negócio', 'Valor']));
     const voompTotal = parseBR(getField(match, ['Faturamento total', 'Faturamento', 'Valor Total']));
     const divergence = pipeValue - voompTotal;
 
@@ -239,7 +307,9 @@ export function reconcile(
       'Divergência_Valor': divergence,
       'Pendente_Financeiro': match ? 'NÃO' : 'SIM',
       'Comissão (Numérica)': match ? extractNumericCommission(getCommissionFromRecord(match)) : 0,
-      'isPermanent': !!match
+      'isPermanent': !!match,
+      'Match_Score': matchScore,
+      'Match_Confiança': matchConf
     } as CommercialReportRecord;
   });
 
@@ -247,6 +317,7 @@ export function reconcile(
   const financialReport = voompData.map(voompRecord => {
     const vCPF = cleanCPF(getField(voompRecord, VOOMP_CPF_FIELDS));
     const vEmail = cleanEmail(getField(voompRecord, VOOMP_EMAIL_FIELDS));
+    const vName = normalizeName(getField(voompRecord, VOOMP_NAME_FIELDS));
     const vId = getField(voompRecord, VOOMP_ID_FIELDS);
 
     let pMatch: PipeRecord | undefined;
@@ -255,21 +326,20 @@ export function reconcile(
     if (mappedPipeId && pipeById.has(mappedPipeId)) {
       pMatch = pipeById.get(mappedPipeId);
     }
-    else if (vCPF && pipeByCPF.has(vCPF)) {
-      pMatch = pipeByCPF.get(vCPF);
+    
+    if (!pMatch && vCPF && pipeByCPF.has(vCPF)) {
+      pMatch = pipeByCPF.get(vCPF)?.[0];
     } 
-    else if (vEmail && pipeByEmail.has(vEmail)) {
-      pMatch = pipeByEmail.get(vEmail);
+    else if (!pMatch && vEmail && pipeByEmail.has(vEmail)) {
+      pMatch = pipeByEmail.get(vEmail)?.[0];
+    }
+    else if (!pMatch && vName && pipeByName.has(vName)) {
+      pMatch = pipeByName.get(vName)?.[0];
     }
 
-    // Check if this Voomp record was actually matched in the commercial report
-    // This ensures consistency between the two reports
     const wasMatchedInCommercial = vId ? usedVoompIds.has(vId) : usedVoompRefs.has(voompRecord);
-    const isOrphan = !wasMatchedInCommercial;
     
-    // Logic for "Tipo de Venda"
     const recurrVal = String(getField(voompRecord, ['Recorrência atual', 'Recorrência']) || '').trim();
-    // Try to extract the first number (e.g., "1" from "1/12")
     const recurrMatch = recurrVal.match(/^(\d+)/);
     const recurrNum = recurrMatch ? parseInt(recurrMatch[1]) : NaN;
     
@@ -279,6 +349,9 @@ export function reconcile(
     } else if (recurrVal === '' || recurrNum === 1) {
       tipoVenda = 'Nova Venda';
     }
+
+    // Option C: Recurrences >= 2 do not need a Pipe match, they are NEVER strictly "Orphans"
+    const isOrphan = !wasMatchedInCommercial && tipoVenda !== 'Venda Recorrente';
 
     return {
       ...voompRecord,
