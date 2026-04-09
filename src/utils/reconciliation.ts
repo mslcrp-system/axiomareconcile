@@ -446,11 +446,29 @@ export function reconcile(
     // Option C: Recurrences >= 2 do not need a Pipe match, they are NEVER strictly "Orphans"
     const isOrphan = !wasMatchedInCommercial && tipoVenda !== 'Venda Recorrente';
 
+    const pValue = pMatch ? parseBR(getField(pMatch, ['Negócio - Valor do negócio', 'Valor'])) : 0;
+    const divergence = pMatch ? pValue - vValue : 0;
+
+    // Determina como o match foi feito para exibir no relatório
+    let matchScore = 'Sem Match';
+    if (pMatch) {
+      if (mappedPipeId) matchScore = 'Mapeamento Manual';
+      else if (vCPF && pipeByCPF.has(vCPF)) matchScore = 'CPF';
+      else if (vEmail && pipeByEmail.has(vEmail)) matchScore = 'E-mail';
+      else if (vName && pipeByName.has(vName)) matchScore = 'Nome';
+      else if (vPhone && pipeByPhone.has(vPhone)) matchScore = 'Telefone';
+      else matchScore = 'Match Indireto';
+    }
+
     return {
       ...voompRecord,
+      ...(pMatch || {}),
       'Negócio - ID': pMatch ? getField(pMatch, PIPE_ID_FIELDS) : '',
       'Proprietário': pMatch ? getField(pMatch, ['Negócio - Proprietário', 'Proprietário']) : '',
       'Status': pMatch ? getField(pMatch, ['Negócio - Status', 'Status']) : '',
+      'Divergência_Valor': pMatch ? divergence : 0,
+      'Pendente_Financeiro': pMatch ? 'NÃO' : 'SIM',
+      'Match_Score': matchScore,
       'Venda_Orfã': isOrphan ? 'SIM' : 'NÃO',
       'Tipo de Venda': tipoVenda,
       'Comissão (Numérica)': extractNumericCommission(getCommissionFromRecord(voompRecord)),
