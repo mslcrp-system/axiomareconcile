@@ -825,7 +825,7 @@ export default function App() {
       data = financialData;
       filename = 'relatorio_financeiro_voomp.csv';
     } else if (activeTab === 'recurrence') {
-      data = financialData.filter(r => r.Venda_Orfã === 'SIM' && r['Tipo de Venda'] === 'Venda Recorrente');
+      data = financialData.filter(r => r['Tipo de Venda'] === 'Venda Recorrente');
       filename = 'historico_recorrencia.csv';
     }
 
@@ -851,7 +851,7 @@ export default function App() {
 
     const data = activeTab === 'commercial' ? commercialData :
                  activeTab === 'financial' ? financialData :
-                 activeTab === 'recurrence' ? financialData.filter(r => r.Venda_Orfã === 'SIM' && r['Tipo de Venda'] === 'Venda Recorrente') : [];
+                 activeTab === 'recurrence' ? financialData.filter(r => r['Tipo de Venda'] === 'Venda Recorrente') : [];
 
     if (!searchTerm) return data;
 
