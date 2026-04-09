@@ -49,6 +49,15 @@ export const cleanCPF = (cpf: string) => {
   if (/^(\d)\1+$/.test(numOnly)) return ''; // ignora '00000000000', '11111111111', etc
   return numOnly;
 };
+// Normaliza telefone para os últimos 11 dígitos (DDD + número BR)
+// Pipe: '+55 (31) 86568412' → '5531986568412' → últimos 11: '31986568412'
+// Voomp: '5531986568412' → últimos 11: '31986568412'
+export const cleanPhone = (phone: string): string => {
+  if (!phone) return '';
+  const digits = String(phone).replace(/\D/g, '');
+  if (digits.length < 8) return ''; // muito curto para ser válido
+  return digits.slice(-11); // compara sempre pelo DDD+número (11 últimos dígitos)
+};
 export const normalizeName = (name: any): string => {
   if (!name || typeof name !== 'string') return '';
   return name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
@@ -103,11 +112,13 @@ export const VOOMP_ID_FIELDS = ['ID Venda', 'ID_Venda', 'Venda ID', 'ID', 'Venda
 export const VOOMP_CPF_FIELDS = ['CPF/CNPJ', 'CPF', 'CNPJ', 'CPF Comprador', 'CNPJ Comprador', 'Documento', 'Documento do Comprador'];
 export const VOOMP_EMAIL_FIELDS = ['Email do comprador', 'Email', 'E-mail', 'Email Comprador', 'E-mail do Comprador'];
 export const VOOMP_NAME_FIELDS = ['Nome do comprador', 'Nome', 'Comprador'];
+export const VOOMP_PHONE_FIELDS = ['Número de telefone', 'Telefone do comprador', 'Telefone', 'Celular', 'Fone'];
 
 export const PIPE_ID_FIELDS = ['Negócio - ID', 'ID Negócio', 'ID', 'Deal ID'];
 export const PIPE_CPF_FIELDS = ['Pessoa - CPF', 'CPF', 'Pessoa CPF', 'CPF/CNPJ', 'Documento'];
 export const PIPE_EMAIL_FIELDS = ['Pessoa - E-mail', 'Email', 'Pessoa Email', 'E-mail'];
 export const PIPE_NAME_FIELDS = ['Pessoa - Nome', 'Nome do contato', 'Nome'];
+export const PIPE_PHONE_FIELDS = ['Pessoa - Telefone', 'Telefone', 'Celular', 'Fone'];
 
 export const extractNumericCommission = (val: any): number => {
   if (typeof val === 'number') return val;
@@ -143,6 +154,14 @@ const getCommissionFromRecord = (record: any): any => {
   return commissionKey ? record[commissionKey] : undefined;
 };
 
+// ─── Helper interno: Recorrência ≥ 2 → venda recorrente ────────────────────
+const VOOMP_RECURRENCE_FIELDS_INTERNAL = ['Recorrência atual', 'Recorrência'];
+function isRecurring(record: VoompRecord): boolean {
+  const val = String(getField(record, VOOMP_RECURRENCE_FIELDS_INTERNAL) ?? '').trim();
+  const num = parseInt((val.match(/^(\d+)/) ?? [])[1] ?? '', 10);
+  return !isNaN(num) && num >= 2;
+}
+
 export function reconcile(
   pipeData: PipeRecord[], 
   voompData: VoompRecord[],
@@ -152,16 +171,23 @@ export function reconcile(
   financialReport: FinancialReportRecord[]
 } {
   // 1. Prepare Lookup Maps for Voomp (for PIPE Anchor)
+  // ⚠️  Recorrentes (Recorrência ≥ 2) NÃO entram nos mapas de cruzamento.
+  //     Só aparecem no financialReport como 'Venda Recorrente'.
   const voompByCPF = new Map<string, VoompRecord[]>();
   const voompByEmail = new Map<string, VoompRecord[]>();
   const voompByName = new Map<string, VoompRecord[]>();
+  const voompByPhone = new Map<string, VoompRecord[]>();
   
   const permanentVoompByPipeId = new Map<string, VoompRecord>();
 
   voompData.forEach(record => {
+    // Recorrentes ficam apenas no relatório de recorrência — não participam do cruzamento
+    if (isRecurring(record)) return;
+
     const cpf = cleanCPF(getField(record, VOOMP_CPF_FIELDS));
     const email = cleanEmail(getField(record, VOOMP_EMAIL_FIELDS));
     const name = normalizeName(getField(record, VOOMP_NAME_FIELDS));
+    const phone = cleanPhone(getField(record, VOOMP_PHONE_FIELDS));
     const idVenda = getField(record, VOOMP_ID_FIELDS);
 
     if (cpf) {
@@ -179,6 +205,11 @@ export function reconcile(
       existing.push(record);
       voompByName.set(name, existing);
     }
+    if (phone) {
+      const existing = voompByPhone.get(phone) || [];
+      existing.push(record);
+      voompByPhone.set(phone, existing);
+    }
     
     if (idVenda) {
       for (const [vId, pId] of permanentMappings.entries()) {
@@ -192,17 +223,40 @@ export function reconcile(
   const usedVoompIds = new Set<string>();
   const usedVoompRefs = new Set<VoompRecord>();
 
-  // Helper to find best Voomp candidate based on value tie-breaker
+  // Prioridade de status da venda Voomp:
+  // 1. Pago (venda confirmada)
+  // 2. Reembolsado (foi transacionado, requer escrituração)
+  // 3. Chargeback (contestação, requer escrituração)
+  // 4. Qualquer outro status (Cancelado, Pendente, etc.)
+  const VOOMP_STATUS_FIELDS = ['Status da Venda', 'Status', 'Situação', 'Situação da Venda'];
+  const getStatusPriority = (record: VoompRecord): number => {
+    const status = String(getField(record, VOOMP_STATUS_FIELDS) || '').toLowerCase().trim();
+    if (status.includes('pago') || status === 'paid') return 3;
+    if (status.includes('reembolsado') || status.includes('refund')) return 2;
+    if (status.includes('chargeback')) return 1;
+    return 0; // Cancelado, Pendente, Expirado, etc.
+  };
+
+  // Helper to find best Voomp candidate:
+  // Critério 1 (primário): Status da venda (Pago > Reembolsado > Chargeback > outros)
+  // Critério 2 (desempate): Valor mais próximo ao do Pipe
   const findBestVoompCandidate = (candidates: VoompRecord[], targetValue: number): VoompRecord | undefined => {
     let bestCandidate: VoompRecord | undefined;
+    let bestStatusPriority = -1;
     let minDiff = Infinity;
     for (const c of candidates) {
       const id = getField(c, VOOMP_ID_FIELDS);
       const isUsed = id ? usedVoompIds.has(id) : usedVoompRefs.has(c);
       if (!isUsed) {
+        const statusPrio = getStatusPriority(c);
         const vValue = parseBR(getField(c, ['Faturamento total', 'Faturamento', 'Valor Total', 'Valor Pago']));
         const diff = Math.abs(targetValue - vValue);
-        if (diff < minDiff) {
+        // Aceita o candidato se tiver status melhor, ou mesmo status com valor mais próximo
+        if (
+          statusPrio > bestStatusPriority ||
+          (statusPrio === bestStatusPriority && diff < minDiff)
+        ) {
+          bestStatusPriority = statusPrio;
           minDiff = diff;
           bestCandidate = c;
         }
@@ -215,12 +269,14 @@ export function reconcile(
   const pipeByCPF = new Map<string, PipeRecord[]>();
   const pipeByEmail = new Map<string, PipeRecord[]>();
   const pipeByName = new Map<string, PipeRecord[]>();
+  const pipeByPhone = new Map<string, PipeRecord[]>();
   const pipeById = new Map<string, PipeRecord>();
   
   pipeData.forEach(record => {
     const cpf = cleanCPF(getField(record, PIPE_CPF_FIELDS));
     const email = cleanEmail(getField(record, PIPE_EMAIL_FIELDS));
     const name = normalizeName(getField(record, PIPE_NAME_FIELDS));
+    const phone = cleanPhone(getField(record, PIPE_PHONE_FIELDS));
     const id = getField(record, PIPE_ID_FIELDS);
 
     if (cpf) {
@@ -238,8 +294,25 @@ export function reconcile(
       existing.push(record);
       pipeByName.set(name, existing);
     }
+    if (phone) {
+      const existing = pipeByPhone.get(phone) || [];
+      existing.push(record);
+      pipeByPhone.set(phone, existing);
+    }
     if (id) pipeById.set(id, record);
   });
+
+  // Helper simétrico: melhor candidato Pipe por tie-breaker de valor
+  const findBestPipeCandidate = (candidates: PipeRecord[], targetValue: number): PipeRecord | undefined => {
+    let best: PipeRecord | undefined;
+    let minDiff = Infinity;
+    for (const c of candidates) {
+      const pValue = parseBR(getField(c, ['Negócio - Valor do negócio', 'Valor']));
+      const diff = Math.abs(targetValue - pValue);
+      if (diff < minDiff) { minDiff = diff; best = c; }
+    }
+    return best;
+  };
 
   // 3. Entrega 1: Relatório Comercial Completo (Âncora PIPE)
   const commercialReport = pipeData.map(pipeRecord => {
@@ -280,12 +353,22 @@ export function reconcile(
       }
     }
 
-    // Priority 4: Nome (Fallback)
+    // Priority 4: Nome
     if (!match && pipeName && voompByName.has(pipeName)) {
       match = findBestVoompCandidate(voompByName.get(pipeName) || [], pipeValue);
       if (match) {
         matchScore = 'Nome';
         matchConf = 60;
+      }
+    }
+
+    // Priority 5: Telefone (último fallback)
+    const pipePhone = cleanPhone(getField(pipeRecord, PIPE_PHONE_FIELDS));
+    if (!match && pipePhone && voompByPhone.has(pipePhone)) {
+      match = findBestVoompCandidate(voompByPhone.get(pipePhone) || [], pipeValue);
+      if (match) {
+        matchScore = 'Telefone';
+        matchConf = 40;
       }
     }
 
@@ -318,23 +401,33 @@ export function reconcile(
     const vCPF = cleanCPF(getField(voompRecord, VOOMP_CPF_FIELDS));
     const vEmail = cleanEmail(getField(voompRecord, VOOMP_EMAIL_FIELDS));
     const vName = normalizeName(getField(voompRecord, VOOMP_NAME_FIELDS));
+    const vPhone = cleanPhone(getField(voompRecord, VOOMP_PHONE_FIELDS));
     const vId = getField(voompRecord, VOOMP_ID_FIELDS);
+    const vValue = parseBR(getField(voompRecord, ['Faturamento total', 'Faturamento', 'Valor Total', 'Valor Pago']));
 
     let pMatch: PipeRecord | undefined;
     
+    // Prioridade 1: Mapeamento Manual
     const mappedPipeId = vId ? permanentMappings.get(vId) : undefined;
     if (mappedPipeId && pipeById.has(mappedPipeId)) {
       pMatch = pipeById.get(mappedPipeId);
     }
     
+    // Prioridade 2: CPF — com tie-breaker por valor
     if (!pMatch && vCPF && pipeByCPF.has(vCPF)) {
-      pMatch = pipeByCPF.get(vCPF)?.[0];
-    } 
-    else if (!pMatch && vEmail && pipeByEmail.has(vEmail)) {
-      pMatch = pipeByEmail.get(vEmail)?.[0];
+      pMatch = findBestPipeCandidate(pipeByCPF.get(vCPF) || [], vValue);
     }
-    else if (!pMatch && vName && pipeByName.has(vName)) {
-      pMatch = pipeByName.get(vName)?.[0];
+    // Prioridade 3: E-mail — com tie-breaker por valor
+    if (!pMatch && vEmail && pipeByEmail.has(vEmail)) {
+      pMatch = findBestPipeCandidate(pipeByEmail.get(vEmail) || [], vValue);
+    }
+    // Prioridade 4: Nome — com tie-breaker por valor
+    if (!pMatch && vName && pipeByName.has(vName)) {
+      pMatch = findBestPipeCandidate(pipeByName.get(vName) || [], vValue);
+    }
+    // Prioridade 5: Telefone — com tie-breaker por valor
+    if (!pMatch && vPhone && pipeByPhone.has(vPhone)) {
+      pMatch = findBestPipeCandidate(pipeByPhone.get(vPhone) || [], vValue);
     }
 
     const wasMatchedInCommercial = vId ? usedVoompIds.has(vId) : usedVoompRefs.has(voompRecord);
