@@ -152,7 +152,7 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
   }
 }
 
-type TabType = 'commercial' | 'financial' | 'recurrence' | 'history' | 'manual' | 'users' | 'clients';
+type TabType = 'history' | 'manual' | 'users' | 'clients';
 
 interface AuthorizedUser {
   id: string;
@@ -212,8 +212,7 @@ export default function App() {
   const [financialData, setFinancialData] = useState<FinancialReportRecord[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabType>('commercial');
-  const [searchTerm, setSearchTerm] = useState('');
+  const [activeTab, setActiveTab] = useState<TabType>('manual');
   const [savedReports, setSavedReports] = useState<SavedReport[]>([]);
   const [reportName, setReportName] = useState('');
   const [permanentMappings, setPermanentMappings] = useState<PermanentMapping[]>([]);
@@ -522,7 +521,7 @@ export default function App() {
       setVoompRawData([]);
       setVoompFiles([]);
       setCurrentReportId(null);
-      setActiveTab('commercial');
+      setActiveTab('manual');
     } catch (error) {
       console.error('Logout error:', error);
     }
@@ -686,7 +685,7 @@ export default function App() {
       setVoompRawData(report.voomp_raw || []);
       
       setCurrentReportId(report.id);
-      setActiveTab('commercial');
+      setActiveTab('manual');
       setNotification({ message: 'Relatório carregado com sucesso!', type: 'success' });
       setTimeout(() => setNotification(null), 3000);
     } catch (error) {
@@ -784,7 +783,7 @@ export default function App() {
       
       setCommercialData(commercialReport);
       setFinancialData(financialReport);
-      setActiveTab('commercial');
+      setActiveTab('manual');
     } catch (error) {
       console.error('Error during reconciliation:', error);
       setNotification({ message: 'Erro ao processar arquivos. Verifique se são CSVs válidos.', type: 'error' });
@@ -809,24 +808,21 @@ export default function App() {
       
       setCommercialData(commercialReport);
       setFinancialData(financialReport);
-      setActiveTab('commercial');
+      setActiveTab('manual');
       setIsProcessing(false);
     }, 500);
   };
 
-  const downloadCSV = () => {
+  const downloadCSV = (type: 'commercial' | 'financial') => {
     let data: any[] = [];
     let filename = '';
 
-    if (activeTab === 'commercial') {
+    if (type === 'commercial') {
       data = commercialData;
       filename = 'relatorio_comercial_pipe.csv';
-    } else if (activeTab === 'financial') {
+    } else if (type === 'financial') {
       data = financialData;
       filename = 'relatorio_financeiro_voomp.csv';
-    } else if (activeTab === 'recurrence') {
-      data = financialData.filter(r => r['Tipo de Venda'] === 'Venda Recorrente');
-      filename = 'historico_recorrencia.csv';
     }
 
     if (data.length === 0) return;
@@ -842,25 +838,6 @@ export default function App() {
     link.click();
     document.body.removeChild(link);
   };
-
-  const filteredData = useMemo(() => {
-    // Early return for non-table tabs to avoid unnecessary computation
-    if (activeTab === 'manual' || activeTab === 'clients' || activeTab === 'history' || activeTab === 'users') {
-      return [];
-    }
-
-    const data = activeTab === 'commercial' ? commercialData :
-                 activeTab === 'financial' ? financialData :
-                 activeTab === 'recurrence' ? financialData.filter(r => r['Tipo de Venda'] === 'Venda Recorrente') : [];
-
-    if (!searchTerm) return data;
-
-    return data.filter((row: any) =>
-      Object.values(row).some(val =>
-        String(val).toLowerCase().includes(searchTerm.toLowerCase())
-      )
-    );
-  }, [activeTab, commercialData, financialData, searchTerm]);
 
   const manualOrphans = useMemo(() => {
     return financialData.filter(r => r.Venda_Orfã === 'SIM' && r['Tipo de Venda'] === 'Nova Venda');
@@ -1188,28 +1165,13 @@ export default function App() {
               <div className="p-10 border-b border-white/5 flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-10 bg-white/[0.01]">
                 <div className="flex p-2 bg-white/[0.03] rounded-[2rem] w-full 2xl:w-fit border border-white/5 shadow-inner overflow-x-auto no-scrollbar scroll-smooth">
                   <div className="flex shrink-0">
-                  <TabButton 
-                    active={activeTab === 'commercial'} 
-                    onClick={() => setActiveTab('commercial')}
-                    label="Relatório Comercial (PIPE)"
-                  />
-                  <TabButton 
-                    active={activeTab === 'financial'} 
-                    onClick={() => setActiveTab('financial')}
-                    label="Relatório Financeiro (Voomp)"
-                  />
-                  <TabButton 
-                    active={activeTab === 'recurrence'} 
-                    onClick={() => setActiveTab('recurrence')}
-                    label="Histórico de Recorrência"
-                  />
-                  <TabButton 
-                    active={activeTab === 'manual'} 
+                  <TabButton
+                    active={activeTab === 'manual'}
                     onClick={() => setActiveTab('manual')}
                     label="Conciliação Manual"
                   />
-                  <TabButton 
-                    active={activeTab === 'clients'} 
+                  <TabButton
+                    active={activeTab === 'clients'}
                     onClick={() => setActiveTab('clients')}
                     label="Base de Clientes"
                   />
@@ -1233,47 +1195,43 @@ export default function App() {
                 </div>
 
                 <div className="flex items-center gap-6 flex-wrap 2xl:flex-nowrap shrink-0 pr-4">
-                  {activeTab !== 'history' && (
-                    <>
-                      {user && commercialData.length > 0 && (
-                        <div className="flex items-center gap-2 bg-white/5 p-1 rounded-2xl border border-white/5 focus-within:border-primary-500/30 transition-all shrink-0">
-                          <input 
-                            type="text"
-                            placeholder="Nome do relatório..."
-                            value={reportName}
-                            onChange={(e) => setReportName(e.target.value)}
-                            className="px-4 py-2.5 bg-transparent text-white text-xs font-bold w-48 outline-none placeholder:text-gray-600"
-                          />
-                          <button 
-                            onClick={saveReport}
-                            disabled={isSaving}
-                            className="flex items-center gap-2 px-6 py-2.5 bg-green-500/10 text-green-400 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-green-500/20 transition-all border border-green-500/20 disabled:opacity-30 disabled:grayscale group"
-                          >
-                            <Save className={cn("w-4 h-4 transition-transform group-hover:scale-110", isSaving && "animate-pulse")} />
-                            {isSaving ? 'Gravando...' : 'Salvar Relatório'}
-                          </button>
-                        </div>
-                      )}
-                      
-                      <div className="relative group">
-                        <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-600 transition-colors group-focus-within:text-primary-400" />
-                        <input 
-                          type="text"
-                          placeholder="Pesquisa global..."
-                          value={searchTerm}
-                          onChange={(e) => setSearchTerm(e.target.value)}
-                          className="pl-14 pr-10 py-3.5 bg-white/[0.03] border border-white/5 rounded-2xl text-sm font-bold text-white focus:outline-none focus:border-primary-500/30 focus:bg-white/[0.05] w-64 2xl:w-80 transition-all"
-                        />
-                      </div>
+                  {user && commercialData.length > 0 && (
+                    <div className="flex items-center gap-2 bg-white/5 p-1 rounded-2xl border border-white/5 focus-within:border-primary-500/30 transition-all shrink-0">
+                      <input
+                        type="text"
+                        placeholder="Nome do relatório..."
+                        value={reportName}
+                        onChange={(e) => setReportName(e.target.value)}
+                        className="px-4 py-2.5 bg-transparent text-white text-xs font-bold w-48 outline-none placeholder:text-gray-600"
+                      />
+                      <button
+                        onClick={saveReport}
+                        disabled={isSaving}
+                        className="flex items-center gap-2 px-6 py-2.5 bg-green-500/10 text-green-400 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-green-500/20 transition-all border border-green-500/20 disabled:opacity-30 disabled:grayscale group"
+                      >
+                        <Save className={cn("w-4 h-4 transition-transform group-hover:scale-110", isSaving && "animate-pulse")} />
+                        {isSaving ? 'Gravando...' : 'Salvar Relatório'}
+                      </button>
+                    </div>
+                  )}
 
-                      <button 
-                        onClick={downloadCSV}
-                        className="flex items-center gap-3 px-6 py-3.5 bg-white/[0.05] text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-white/[0.1] transition-all border border-white/10 group"
+                  {commercialData.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => downloadCSV('commercial')}
+                        className="flex items-center gap-2 px-5 py-3.5 bg-white/[0.05] text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-white/[0.1] transition-all border border-white/10 group"
                       >
                         <Download className="w-4 h-4 text-primary-400 group-hover:translate-y-0.5 transition-transform" />
-                        Exportar CSV
+                        Comercial
                       </button>
-                    </>
+                      <button
+                        onClick={() => downloadCSV('financial')}
+                        className="flex items-center gap-2 px-5 py-3.5 bg-white/[0.05] text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-white/[0.1] transition-all border border-white/10 group"
+                      >
+                        <Download className="w-4 h-4 text-orange-400 group-hover:translate-y-0.5 transition-transform" />
+                        Financeiro
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -1414,9 +1372,9 @@ export default function App() {
                       formatBR={formatBR}
                     />
                   </Suspense>
-                  ) : activeTab === 'manual' ? (
-                  <Suspense fallback={<div className="p-20 text-center animate-pulse">Carregando Concilição Manual...</div>}>
-                    <ManualReconciliation 
+                ) : (
+                  <Suspense fallback={<div className="p-20 text-center animate-pulse">Carregando Conciliação Manual...</div>}>
+                    <ManualReconciliation
                       user={user}
                       isProcessing={isProcessing}
                       manualOrphans={manualOrphans}
@@ -1432,73 +1390,6 @@ export default function App() {
                       formatBR={formatBR}
                     />
                   </Suspense>
-                ) : (
-                  <table className="w-full text-left border-collapse">
-                    <thead className="sticky top-0 z-10 glass-header shadow-[0_4px_30px_rgba(0,0,0,0.3)]">
-                      <tr className="text-[10px] uppercase tracking-widest text-gray-400 font-bold border-b border-gray-100">
-                        {activeTab === 'commercial' ? (
-                          <>
-                            <Th>Negócio ID</Th>
-                            <Th>Cliente</Th>
-                            <Th>Proprietário</Th>
-                            <Th>Valor PIPE</Th>
-                            <Th>Faturamento Voomp</Th>
-                            <Th>Divergência</Th>
-                            <Th>Comissão (Num)</Th>
-                            <Th>Pendente Financeiro</Th>
-                            <Th>Liquidez</Th>
-                          </>
-                        ) : activeTab === 'financial' ? (
-                          <>
-                            <Th>ID Venda</Th>
-                            <Th>Comprador</Th>
-                            <Th>Faturamento</Th>
-                            <Th>Recorrência Atual</Th>
-                            <Th>Comissão (Num)</Th>
-                            <Th>Negócio ID</Th>
-                            <Th>Proprietário</Th>
-                            <Th>Tipo de Venda</Th>
-                            <Th>Venda Órfã</Th>
-                            <Th>Origem</Th>
-                          </>
-                        ) : activeTab === 'recurrence' ? (
-                          <>
-                            <Th>ID Venda</Th>
-                            <Th>Comprador</Th>
-                            <Th>Faturamento</Th>
-                            <Th>Recorrência Atual</Th>
-                            <Th>Comissão (Num)</Th>
-                            <Th>Tipo de Venda</Th>
-                            <Th>Status</Th>
-                          </>
-                        ) : (
-                          <>
-                            <Th>ID Venda</Th>
-                            <Th>Comprador</Th>
-                            <Th>Faturamento</Th>
-                            <Th>Recorrência Atual</Th>
-                            <Th>Comissão (Num)</Th>
-                            <Th>Tipo de Venda</Th>
-                            <Th>Venda Órfã</Th>
-                          </>
-                        )}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
-                      <AnimatePresence mode="popLayout">
-                        {filteredData.map((row: any, idx) => (
-                          <ReportTableRow key={`${activeTab}-${idx}`} row={row} activeTab={activeTab} idx={idx} />
-                        ))}
-                      </AnimatePresence>
-                    </tbody>
-                  </table>
-                )}
-                {/* Empty State logic (Table Tabs Only) */}
-                {activeTab !== 'history' && activeTab !== 'manual' && activeTab !== 'clients' && filteredData.length === 0 && (
-                  <div className="py-20 flex flex-col items-center justify-center text-gray-400">
-                    <Filter className="w-12 h-12 mb-4 opacity-20" />
-                    <p>Nenhum registro encontrado para esta busca.</p>
-                  </div>
                 )}
               </div>
             </div>
